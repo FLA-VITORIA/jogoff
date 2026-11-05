@@ -1,0 +1,1068 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Free Fire Style 3D Battle Royale</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Three.js (3D Rendering Engine) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- Supabase JS Client (Versão 2) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      user-select: none;
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background-color: #050505;
+    }
+
+    #canvas-container {
+      width: 100%;
+      height: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
+      z-index: 1;
+    }
+
+    /* Crosshair Customizado */
+    .crosshair {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 20px;
+      height: 20px;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      z-index: 10;
+    }
+    .crosshair::before, .crosshair::after {
+      content: '';
+      position: absolute;
+      background-color: rgba(255, 255, 255, 0.85);
+    }
+    .crosshair::before {
+      top: 9px;
+      left: 0;
+      width: 20px;
+      height: 2px;
+      box-shadow: 0 0 4px rgba(0,0,0,0.8);
+    }
+    .crosshair::after {
+      top: 0;
+      left: 9px;
+      width: 2px;
+      height: 20px;
+      box-shadow: 0 0 4px rgba(0,0,0,0.8);
+    }
+    .crosshair-dot {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      width: 4px;
+      height: 4px;
+      background-color: #ff3333;
+      border-radius: 50%;
+    }
+
+    /* UI Glassmorphism Base */
+    .glass-panel {
+      background: rgba(15, 23, 42, 0.75);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+    }
+
+    /* Hit Effect Overlay */
+    #damage-overlay {
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle, transparent 40%, rgba(220, 38, 38, 0.6) 100%);
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.15s ease-out;
+      z-index: 15;
+    }
+
+    /* Safezone Alert Banner */
+    .zone-alert {
+      animation: pulseAlert 1.5s infinite alternate;
+    }
+    @keyframes pulseAlert {
+      0% { opacity: 0.4; }
+      100% { opacity: 1; }
+    }
+  </style>
+</head>
+<body class="text-white">
+
+  <!-- Three.js Canvas Container -->
+  <div id="canvas-container"></div>
+  
+  <!-- Overlay de Dano Visual -->
+  <div id="damage-overlay"></div>
+
+  <!-- Mira (Crosshair) -->
+  <div id="crosshair" class="crosshair hidden">
+    <div class="crosshair-dot"></div>
+  </div>
+
+  <!-- HUD DO JOGO (INTERFAZ AO VIVO) -->
+  <div id="hud-ui" class="absolute inset-0 pointer-events-none z-10 hidden flex flex-col justify-between p-4 md:p-6">
+    
+    <!-- Top Bar: Infos Globais, Minimapa, Placar -->
+    <div class="flex justify-between items-start">
+      
+      <!-- Stats do Jogador (Abates, Vivos) -->
+      <div class="flex gap-3">
+        <div class="glass-panel rounded-lg px-4 py-2 flex items-center gap-3">
+          <i class="fa-solid fa-users text-amber-400 text-lg"></i>
+          <div>
+            <div class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Vivos</div>
+            <div id="hud-alive" class="text-xl font-black text-white leading-tight">20</div>
+          </div>
+        </div>
+
+        <div class="glass-panel rounded-lg px-4 py-2 flex items-center gap-3">
+          <i class="fa-solid fa-skull text-red-500 text-lg"></i>
+          <div>
+            <div class="text-[10px] text-gray-400 font-semibold uppercase tracking-wider">Abates</div>
+            <div id="hud-kills" class="text-xl font-black text-white leading-tight">0</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Alerta da Zona Segura & Timer -->
+      <div class="glass-panel rounded-lg px-4 py-2 text-center border-amber-500/30">
+        <div class="text-[11px] font-bold text-amber-400 uppercase tracking-widest flex items-center gap-1.5 justify-center">
+          <i class="fa-solid fa-biohazard zone-alert"></i> Zona Encolhendo
+        </div>
+        <div id="hud-zone-timer" class="text-lg font-mono font-bold text-amber-200">01:30</div>
+      </div>
+
+      <!-- Minimapa (Radar) -->
+      <div class="glass-panel p-1.5 rounded-xl border-2 border-slate-700/60 shadow-2xl relative">
+        <canvas id="minimap" width="140" height="140" class="rounded-lg bg-emerald-950/80"></canvas>
+        <div class="absolute bottom-2 left-2 text-[9px] bg-slate-900/80 px-1.5 py-0.5 rounded text-gray-400 font-mono">RADAR N-1</div>
+      </div>
+    </div>
+
+    <!-- Feed de Abates (Killfeed - Topo Direito Aumentado) -->
+    <div id="killfeed-container" class="absolute top-24 right-6 w-64 space-y-1.5 text-xs font-semibold"></div>
+
+    <!-- Pick Up Prompt (Item Interativo Próximo) -->
+    <div id="pickup-prompt" class="self-center hidden glass-panel px-6 py-2.5 rounded-full border-amber-400/50 text-amber-300 text-sm font-bold tracking-wider animate-bounce flex items-center gap-2">
+      <kbd class="bg-amber-400 text-slate-950 px-2 py-0.5 rounded font-black text-xs">E</kbd>
+      <span id="pickup-text">Pegar Item</span>
+    </div>
+
+    <!-- Bottom Bar: Status de Vida, Colete, Armas & Munição -->
+    <div class="flex justify-between items-end">
+      
+      <!-- Vida & Armadura -->
+      <div class="w-72 glass-panel p-3.5 rounded-xl space-y-2">
+        <!-- Colete / Shield -->
+        <div>
+          <div class="flex justify-between text-xs font-bold text-cyan-300 mb-1">
+            <span class="flex items-center gap-1"><i class="fa-solid fa-shield-halved"></i> Colete Nv.3</span>
+            <span id="hud-shield-val">100 / 100</span>
+          </div>
+          <div class="w-full bg-slate-800 rounded-full h-2.5 overflow-hidden">
+            <div id="hud-shield-bar" class="bg-cyan-400 h-full transition-all duration-200" style="width: 100%"></div>
+          </div>
+        </div>
+
+        <!-- HP / Vida -->
+        <div>
+          <div class="flex justify-between text-xs font-bold text-emerald-400 mb-1">
+            <span class="flex items-center gap-1"><i class="fa-solid fa-heart"></i> Vida</span>
+            <span id="hud-hp-val">100 / 100</span>
+          </div>
+          <div class="w-full bg-slate-800 rounded-full h-3 overflow-hidden">
+            <div id="hud-hp-bar" class="bg-emerald-500 h-full transition-all duration-200" style="width: 100%"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Arma Ativa & Munição -->
+      <div class="glass-panel p-4 rounded-xl flex items-center gap-5 border-amber-500/20">
+        <div class="text-right">
+          <div id="hud-weapon-name" class="text-xs uppercase font-extrabold text-amber-400 tracking-wider">AK-47 Fogo</div>
+          <div class="text-3xl font-black font-mono tracking-tighter">
+            <span id="hud-ammo-clip" class="text-white">30</span>
+            <span class="text-gray-500 text-lg">/</span>
+            <span id="hud-ammo-reserve" class="text-gray-400 text-base">120</span>
+          </div>
+        </div>
+        <div class="w-12 h-12 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-300 text-xl">
+          <i id="hud-weapon-icon" class="fa-solid fa-crosshairs"></i>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- MENU INICIAL / LOBBY -->
+  <div id="menu-overlay" class="absolute inset-0 z-30 flex items-center justify-center bg-slate-950/90 backdrop-blur-md">
+    <div class="max-w-md w-full glass-panel p-8 rounded-2xl border border-slate-700/60 shadow-2xl text-center space-y-6">
+      
+      <div>
+        <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-tr from-amber-600 to-red-600 mb-3 shadow-lg shadow-red-600/30">
+          <i class="fa-solid fa-fire text-3xl text-white"></i>
+        </div>
+        <h1 class="text-3xl font-black tracking-wider uppercase bg-clip-text text-transparent bg-gradient-to-r from-amber-400 via-orange-500 to-red-500">
+          FREE FIRE 3D
+        </h1>
+        <p class="text-xs text-slate-400 mt-1 uppercase tracking-widest font-semibold">Supabase Battle Royale Edition</p>
+      </div>
+
+      <div class="space-y-3">
+        <input type="text" id="player-name-input" placeholder="Seu Nickname" value="ProPlayer_BR" 
+               class="w-full bg-slate-900 border border-slate-700 focus:border-amber-500 rounded-xl px-4 py-3 text-center text-white text-sm outline-none font-bold transition-all">
+        
+        <button id="btn-start" class="w-full py-4 rounded-xl bg-gradient-to-r from-amber-500 to-red-600 hover:from-amber-400 hover:to-red-500 font-extrabold text-sm uppercase tracking-widest shadow-lg shadow-amber-600/25 transition-all transform hover:scale-[1.02] active:scale-[0.98]">
+          <i class="fa-solid fa-play mr-2"></i> Iniciar Partida
+        </button>
+      </div>
+
+      <!-- Supabase Setup Box -->
+      <div class="text-left bg-slate-900/90 p-3.5 rounded-xl border border-slate-800 text-[11px] text-slate-400 space-y-1">
+        <div class="flex items-center gap-1.5 text-emerald-400 font-bold">
+          <i class="fa-solid fa-database"></i> Supabase Integration Active
+        </div>
+        <p class="leading-relaxed">Conexão pronta para armazenar leaderboards, nicknames e status em tempo real.</p>
+      </div>
+
+      <div class="text-[11px] text-slate-500 font-medium">
+        Controles: <span class="text-slate-300">WASD</span> para andar | <span class="text-slate-300">Mouse</span> para mirar | <span class="text-slate-300">Clique Esquerdo</span> Atirar | <span class="text-slate-300">E</span> Coletar Loot
+      </div>
+    </div>
+  </div>
+
+  <!-- TELA DE GAME OVER / VICTORY -->
+  <div id="gameover-overlay" class="absolute inset-0 z-40 hidden flex items-center justify-center bg-slate-950/95 backdrop-blur-lg">
+    <div class="max-w-sm w-full glass-panel p-8 rounded-2xl text-center space-y-6 border-red-500/30">
+      <div id="gameover-icon-box" class="w-20 h-20 mx-auto rounded-full bg-red-600/20 border-2 border-red-500 flex items-center justify-center text-4xl text-red-500">
+        <i class="fa-solid fa-skull"></i>
+      </div>
+
+      <div>
+        <h2 id="gameover-title" class="text-3xl font-black uppercase tracking-wider text-red-500">ELIMINADO</h2>
+        <p id="gameover-subtitle" class="text-xs text-slate-400 mt-1">Você não sobreviveu à zona perigosa.</p>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3 bg-slate-900/60 p-3 rounded-xl text-left border border-slate-800">
+        <div>
+          <div class="text-[10px] text-gray-400 uppercase font-semibold">Posição</div>
+          <div id="gameover-rank" class="text-lg font-black text-amber-400">#12 / 20</div>
+        </div>
+        <div>
+          <div class="text-[10px] text-gray-400 uppercase font-semibold">Abates</div>
+          <div id="gameover-kills" class="text-lg font-black text-white">4</div>
+        </div>
+      </div>
+
+      <button id="btn-restart" class="w-full py-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 font-extrabold text-xs uppercase tracking-widest border border-slate-700 transition-all">
+        <i class="fa-solid fa-rotate-right mr-2"></i> Jogar Novamente
+      </button>
+    </div>
+  </div>
+
+  <!-- LÓGICA DO JOGO -->
+  <script>
+    /* =========================================================================
+       1. SUPABASE CLIENT TEMPLATE & SETUP
+       ========================================================================= */
+    const SUPABASE_URL = 'https://seu-projeto.supabase.co'; // Substitua pela sua URL Supabase
+    const SUPABASE_KEY = 'sua-chave-anon-publica'; // Substitua pela sua Key Supabase
+    
+    // Inicialização segura da instância Supabase usando uma variável distinta
+    let supabaseClient = null;
+    try {
+      if (typeof window.supabase !== 'undefined' && SUPABASE_URL !== 'https://seu-projeto.supabase.co') {
+        supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        console.log('[Supabase] Conectado com sucesso.');
+      }
+    } catch(err) {
+      console.warn('[Supabase] Executando em modo offline / sem chave definida.');
+    }
+
+    async function savePlayerStatsToSupabase(name, kills, rank) {
+      if (!supabaseClient) return;
+      try {
+        const { data, error } = await supabaseClient
+          .from('match_history')
+          .insert([{ player_name: name, kills: kills, rank: rank, created_at: new Date() }]);
+        if (error) console.error('[Supabase Error]', error);
+        else console.log('[Supabase] Resultado da partida salvo!', data);
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    /* =========================================================================
+       2. CONFIGURAÇÕES E ESTADO DO JOGO
+       ========================================================================= */
+    const MAP_SIZE = 300;
+    const INITIAL_BOTS = 19;
+    
+    const GAME_STATE = {
+      active: false,
+      playerName: "Player",
+      aliveCount: INITIAL_BOTS + 1,
+      kills: 0,
+      safeZoneRadius: MAP_SIZE / 1.4,
+      safeZoneCenter: new THREE.Vector3(0, 0, 0),
+      shrinkSpeed: 0.05
+    };
+
+    // Objeto do Jogador
+    const player = {
+      mesh: null,
+      hp: 100,
+      maxHp: 100,
+      shield: 100,
+      maxShield: 100,
+      weapon: { name: 'M4A1 Fogo', clip: 30, maxClip: 30, reserve: 120, damage: 28, fireRate: 150 },
+      lastShotTime: 0,
+      position: new THREE.Vector3(0, 1.2, 0),
+      velocity: new THREE.Vector3(),
+      rotationY: 0,
+      pitch: 0
+    };
+
+    const keys = { w: false, a: false, s: false, d: false, e: false, mouseLeft: false };
+    const bots = [];
+    const lootItems = [];
+    const bullets = [];
+
+    // Referências DOM
+    const menuOverlay = document.getElementById('menu-overlay');
+    const hudUi = document.getElementById('hud-ui');
+    const crosshair = document.getElementById('crosshair');
+    const gameoverOverlay = document.getElementById('gameover-overlay');
+    const pickupPrompt = document.getElementById('pickup-prompt');
+    const damageOverlay = document.getElementById('damage-overlay');
+
+    /* =========================================================================
+       3. INICIALIZAÇÃO DO MOTOR THREE.JS
+       ========================================================================= */
+    let scene, camera, renderer, clock;
+    let safeZoneMesh, stormZoneMesh;
+
+    function initThree() {
+      const container = document.getElementById('canvas-container');
+
+      // Scene
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x87ceeb); // Céu ensolarado
+      scene.fog = new THREE.FogExp2(0x87ceeb, 0.005);
+
+      // Camera
+      camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 1000);
+
+      // Renderer
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      container.appendChild(renderer.domElement);
+
+      clock = new THREE.Clock();
+
+      // Iluminação estilo Battle Royale Tropico
+      const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+      scene.add(ambientLight);
+
+      const sunLight = new THREE.DirectionalLight(0xfffaed, 0.9);
+      sunLight.position.set(100, 150, 50);
+      sunLight.castShadow = true;
+      sunLight.shadow.mapSize.width = 2048;
+      sunLight.shadow.mapSize.height = 2048;
+      sunLight.shadow.camera.near = 0.5;
+      sunLight.shadow.camera.far = 400;
+      const d = 150;
+      sunLight.shadow.camera.left = -d;
+      sunLight.shadow.camera.right = d;
+      sunLight.shadow.camera.top = d;
+      sunLight.shadow.camera.bottom = -d;
+      scene.add(sunLight);
+
+      // Criar Ilha & Elementos
+      buildMap();
+      createSafeZone();
+
+      // Eventos de Redimensionamento
+      window.addEventListener('resize', onWindowResize);
+    }
+
+    /* =========================================================================
+       4. CONSTRUÇÃO DO MAPA 3D (ILHA, OBSTÁCULOS & CASAS)
+       ========================================================================= */
+    function buildMap() {
+      // Chão (Grama da Ilha)
+      const terrainGeo = new THREE.PlaneGeometry(MAP_SIZE * 2, MAP_SIZE * 2, 64, 64);
+      terrainGeo.rotateX(-Math.PI / 2);
+      
+      const terrainMat = new THREE.MeshStandardMaterial({ 
+        color: 0x3e7c32, 
+        roughness: 0.8,
+        metalness: 0.1
+      });
+      const terrain = new THREE.Mesh(terrainGeo, terrainMat);
+      terrain.receiveShadow = true;
+      scene.add(terrain);
+
+      // Mar ao redor
+      const oceanGeo = new THREE.PlaneGeometry(MAP_SIZE * 6, MAP_SIZE * 6);
+      oceanGeo.rotateX(-Math.PI / 2);
+      const oceanMat = new THREE.MeshBasicMaterial({ color: 0x1d4ed8, transparent: true, opacity: 0.7 });
+      const ocean = new THREE.Mesh(oceanGeo, oceanMat);
+      ocean.position.y = -0.5;
+      scene.add(ocean);
+
+      // Casas & Caixas espalhadas
+      const boxGeo = new THREE.BoxGeometry(1, 1, 1);
+      
+      // Casas / Bunkers (Estruturas Rápidas)
+      for (let i = 0; i < 18; i++) {
+        const cx = (Math.random() - 0.5) * (MAP_SIZE - 40);
+        const cz = (Math.random() - 0.5) * (MAP_SIZE - 40);
+
+        const houseGroup = new THREE.Group();
+        
+        // Paredes
+        const wallMat = new THREE.MeshStandardMaterial({ color: 0xd1d5db, roughness: 0.6 });
+        const houseBody = new THREE.Mesh(new THREE.BoxGeometry(10, 5, 10), wallMat);
+        houseBody.position.y = 2.5;
+        houseBody.castShadow = true;
+        houseBody.receiveShadow = true;
+        houseGroup.add(houseBody);
+
+        // Telhado
+        const roofMat = new THREE.MeshStandardMaterial({ color: 0x991b1b });
+        const roof = new THREE.Mesh(new THREE.ConeGeometry(8, 3, 4), roofMat);
+        roof.position.y = 6.5;
+        roof.rotation.y = Math.PI / 4;
+        roof.castShadow = true;
+        houseGroup.add(roof);
+
+        houseGroup.position.set(cx, 0, cz);
+        scene.add(houseGroup);
+      }
+
+      // Árvores e Caixas de Cobertura (Cover)
+      const treeTrunkMat = new THREE.MeshStandardMaterial({ color: 0x78350f });
+      const treeLeavesMat = new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.5 });
+
+      for (let i = 0; i < 120; i++) {
+        const tx = (Math.random() - 0.5) * (MAP_SIZE - 20);
+        const tz = (Math.random() - 0.5) * (MAP_SIZE - 20);
+
+        const tree = new THREE.Group();
+        const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.6, 4), treeTrunkMat);
+        trunk.position.y = 2;
+        trunk.castShadow = true;
+        tree.add(trunk);
+
+        const foliage = new THREE.Mesh(new THREE.ConeGeometry(3, 6, 6), treeLeavesMat);
+        foliage.position.y = 6;
+        foliage.castShadow = true;
+        tree.add(foliage);
+
+        tree.position.set(tx, 0, tz);
+        scene.add(tree);
+      }
+
+      // Spawn de Loot pelo Mapa
+      spawnLootItems();
+    }
+
+    /* =========================================================================
+       5. SISTEMA DE LOOT (ARMAS, COLETES, MEDKITS)
+       ========================================================================= */
+    function spawnLootItems() {
+      const types = [
+        { type: 'weapon', color: 0xf59e0b, name: 'Groza Lendária', icon: 'fa-gun' },
+        { type: 'medkit', color: 0x10b981, name: 'Kit Médico', icon: 'fa-kit-medical' },
+        { type: 'shield', color: 0x06b6d4, name: 'Colete Nível 3', icon: 'fa-shield' }
+      ];
+
+      for (let i = 0; i < 35; i++) {
+        const itemInfo = types[Math.floor(Math.random() * types.length)];
+        const group = new THREE.Group();
+
+        // Mesh Brilhante Flutuante
+        const geo = itemInfo.type === 'weapon' ? new THREE.BoxGeometry(0.8, 0.2, 0.3) : new THREE.SphereGeometry(0.4, 8, 8);
+        const mat = new THREE.MeshBasicMaterial({ color: itemInfo.color, wireframe: true });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.position.y = 0.5;
+        group.add(mesh);
+
+        // Anel de luz abaixo
+        const ringGeo = new THREE.RingGeometry(0.3, 0.5, 16);
+        ringGeo.rotateX(-Math.PI / 2);
+        const ringMat = new THREE.MeshBasicMaterial({ color: itemInfo.color, side: THREE.DoubleSide, transparent: true, opacity: 0.6 });
+        const ring = new THREE.Mesh(ringGeo, ringMat);
+        ring.position.y = 0.05;
+        group.add(ring);
+
+        const x = (Math.random() - 0.5) * (MAP_SIZE - 40);
+        const z = (Math.random() - 0.5) * (MAP_SIZE - 40);
+        group.position.set(x, 0, z);
+
+        scene.add(group);
+        lootItems.push({ mesh: group, info: itemInfo, active: true });
+      }
+    }
+
+    /* =========================================================================
+       6. ZONA SEGURA (SAFEZONE / GÁS TÓXICO)
+       ========================================================================= */
+    function createSafeZone() {
+      // Cilindro do Gás Tóxico Externo
+      const stormGeo = new THREE.CylinderGeometry(MAP_SIZE, MAP_SIZE, 60, 32, 1, true);
+      const stormMat = new THREE.MeshBasicMaterial({ color: 0x9333ea, side: THREE.BackSide, transparent: true, opacity: 0.25 });
+      stormZoneMesh = new THREE.Mesh(stormGeo, stormMat);
+      stormZoneMesh.position.y = 30;
+      scene.add(stormZoneMesh);
+    }
+
+    function updateSafeZone(delta) {
+      if (GAME_STATE.safeZoneRadius > 10) {
+        GAME_STATE.safeZoneRadius -= GAME_STATE.shrinkSpeed * delta * 5;
+        stormZoneMesh.scale.set(GAME_STATE.safeZoneRadius / MAP_SIZE, 1, GAME_STATE.safeZoneRadius / MAP_SIZE);
+      }
+
+      // Checar se o jogador está fora da safezone
+      const distFromCenter = player.position.distanceTo(GAME_STATE.safeZoneCenter);
+      if (distFromCenter > GAME_STATE.safeZoneRadius) {
+        applyDamageToPlayer(8 * delta); // Dano do gás
+        showDamageOverlay();
+      }
+    }
+
+    /* =========================================================================
+       7. JOGADOR & CONTROLES DE MIRA/CÂMERA
+       ========================================================================= */
+    function setupPlayer() {
+      // Mesh representativo do jogador (Visão em 3ª pessoa)
+      const bodyGroup = new THREE.Group();
+      
+      const torsoGeo = new THREE.BoxGeometry(0.8, 1.2, 0.4);
+      const torsoMat = new THREE.MeshStandardMaterial({ color: 0xd97706 });
+      const torso = new THREE.Mesh(torsoGeo, torsoMat);
+      torso.position.y = 0.6;
+      torso.castShadow = true;
+      bodyGroup.add(torso);
+
+      const headGeo = new THREE.SphereGeometry(0.3, 16, 16);
+      const headMat = new THREE.MeshStandardMaterial({ color: 0xfbcfe8 });
+      const head = new THREE.Mesh(headGeo, headMat);
+      head.position.y = 1.4;
+      head.castShadow = true;
+      bodyGroup.add(head);
+
+      player.mesh = bodyGroup;
+      scene.add(player.mesh);
+
+      // Travar Pointer Lock do Mouse para controlar mira 3D
+      document.body.addEventListener('click', () => {
+        if (GAME_STATE.active && document.pointerLockElement !== document.body) {
+          document.body.requestPointerLock();
+        }
+      });
+
+      document.addEventListener('mousemove', (e) => {
+        if (!GAME_STATE.active || document.pointerLockElement !== document.body) return;
+
+        const sensitivity = 0.0022;
+        player.rotationY -= e.movementX * sensitivity;
+        player.pitch -= e.movementY * sensitivity;
+
+        // Limitar rotação vertical da câmera
+        player.pitch = Math.max(-Math.PI / 4, Math.min(Math.PI / 4, player.pitch));
+      });
+
+      // Teclado
+      window.addEventListener('keydown', (e) => {
+        const k = e.key.toLowerCase();
+        if (k in keys) keys[k] = true;
+        if (k === 'e') checkPickUpLoot();
+      });
+
+      window.addEventListener('keyup', (e) => {
+        const k = e.key.toLowerCase();
+        if (k in keys) keys[k] = false;
+      });
+
+      // Mouse Shoot
+      window.addEventListener('mousedown', (e) => {
+        if (e.button === 0) {
+          keys.mouseLeft = true;
+          shootWeapon();
+        }
+      });
+      window.addEventListener('mouseup', (e) => {
+        if (e.button === 0) keys.mouseLeft = false;
+      });
+    }
+
+    function updatePlayerMovement(delta) {
+      if (!GAME_STATE.active) return;
+
+      const speed = 14 * delta;
+      const moveVector = new THREE.Vector3();
+
+      if (keys.w) moveVector.z -= 1;
+      if (keys.s) moveVector.z += 1;
+      if (keys.a) moveVector.x -= 1;
+      if (keys.d) moveVector.x += 1;
+
+      moveVector.normalize();
+      moveVector.applyAxisAngle(new THREE.Vector3(0, 1, 0), player.rotationY);
+
+      player.position.addScaledVector(moveVector, speed);
+
+      // Manter jogador nos limites do mapa
+      player.position.x = Math.max(-MAP_SIZE + 2, Math.min(MAP_SIZE - 2, player.position.x));
+      player.position.z = Math.max(-MAP_SIZE + 2, Math.min(MAP_SIZE - 2, player.position.z));
+
+      player.mesh.position.copy(player.position);
+      player.mesh.rotation.y = player.rotationY;
+
+      // Atualizar Câmera em 3ª Pessoa (Atrás do ombro)
+      const cameraOffset = new THREE.Vector3(0.8, 2.2, 4);
+      cameraOffset.applyAxisAngle(new THREE.Vector3(1, 0, 0), player.pitch);
+      cameraOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), player.rotationY);
+
+      camera.position.copy(player.position).add(cameraOffset);
+      
+      const lookTarget = player.position.clone().add(new THREE.Vector3(0, 1.5, 0));
+      lookTarget.add(new THREE.Vector3(0, Math.sin(player.pitch) * 5, 0));
+      camera.lookAt(lookTarget);
+
+      // Continuous firing
+      if (keys.mouseLeft) shootWeapon();
+    }
+
+    /* =========================================================================
+       8. SISTEMA DE BOTS (INIMIGOS IA ALCANCE DE BR)
+       ========================================================================= */
+    function spawnBots() {
+      for (let i = 0; i < INITIAL_BOTS; i++) {
+        const botGroup = new THREE.Group();
+
+        const bodyMesh = new THREE.Mesh(
+          new THREE.BoxGeometry(0.8, 1.2, 0.4),
+          new THREE.MeshStandardMaterial({ color: 0xef4444 })
+        );
+        bodyMesh.position.y = 0.6;
+        bodyMesh.castShadow = true;
+        botGroup.add(bodyMesh);
+
+        const head = new THREE.Mesh(
+          new THREE.SphereGeometry(0.3, 12, 12),
+          new THREE.MeshStandardMaterial({ color: 0x1e293b })
+        );
+        head.position.y = 1.4;
+        botGroup.add(head);
+
+        const x = (Math.random() - 0.5) * (MAP_SIZE - 30);
+        const z = (Math.random() - 0.5) * (MAP_SIZE - 30);
+        botGroup.position.set(x, 0, z);
+
+        scene.add(botGroup);
+
+        bots.push({
+          mesh: botGroup,
+          hp: 100,
+          alive: true,
+          name: `Bot_BR_${i+10}`,
+          lastShoot: 0,
+          targetDir: new THREE.Vector3((Math.random() - 0.5), 0, (Math.random() - 0.5)).normalize()
+        });
+      }
+    }
+
+    function updateBots(delta, now) {
+      bots.forEach(bot => {
+        if (!bot.alive) return;
+
+        // Mover bots em direção ao centro da Zona
+        const distToPlayer = bot.mesh.position.distanceTo(player.position);
+
+        if (distToPlayer < 35) {
+          // Virar para o player e atirar
+          bot.mesh.lookAt(player.position.x, bot.mesh.position.y, player.position.z);
+          
+          if (now - bot.lastShoot > 800) {
+            botShoot(bot);
+            bot.lastShoot = now;
+          }
+        } else {
+          // Movimento aleatório de patrulha
+          bot.mesh.position.addScaledVector(bot.targetDir, 5 * delta);
+          bot.mesh.rotation.y = Math.atan2(bot.targetDir.x, bot.targetDir.z);
+
+          if (Math.random() < 0.01) {
+            bot.targetDir.set((Math.random() - 0.5), 0, (Math.random() - 0.5)).normalize();
+          }
+        }
+
+        // Se o bot estiver fora do mapa
+        bot.mesh.position.x = Math.max(-MAP_SIZE + 5, Math.min(MAP_SIZE - 5, bot.mesh.position.x));
+        bot.mesh.position.z = Math.max(-MAP_SIZE + 5, Math.min(MAP_SIZE - 5, bot.mesh.position.z));
+      });
+    }
+
+    function botShoot(bot) {
+      // Projétil Vermelho do Bot
+      const bGeo = new THREE.SphereGeometry(0.15, 8, 8);
+      const bMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+      const bullet = new THREE.Mesh(bGeo, bMat);
+
+      bullet.position.copy(bot.mesh.position).add(new THREE.Vector3(0, 1.2, 0));
+      
+      const dir = player.position.clone().sub(bot.mesh.position).normalize();
+      // Erro de mira proposital do bot
+      dir.x += (Math.random() - 0.5) * 0.1;
+      dir.z += (Math.random() - 0.5) * 0.1;
+
+      scene.add(bullet);
+      bullets.push({ mesh: bullet, dir: dir, speed: 45, isEnemy: true, createdAt: performance.now() });
+    }
+
+    /* =========================================================================
+       9. SISTEMA DE TIRO & PROJÉTEIS (PLAYER)
+       ========================================================================= */
+    function shootWeapon() {
+      const now = performance.now();
+      if (now - player.lastShotTime < player.weapon.fireRate) return;
+      if (player.weapon.clip <= 0) {
+        // Sem munição no pente
+        return;
+      }
+
+      player.lastShotTime = now;
+      player.weapon.clip--;
+      updateHUD();
+
+      // Projétil Amarelo do Jogador
+      const bGeo = new THREE.SphereGeometry(0.15, 8, 8);
+      const bMat = new THREE.MeshBasicMaterial({ color: 0xfacc15 });
+      const bullet = new THREE.Mesh(bGeo, bMat);
+
+      const spawnPos = player.position.clone().add(new THREE.Vector3(0, 1.3, 0));
+      bullet.position.copy(spawnPos);
+
+      // Direção da mira
+      const dir = new THREE.Vector3(0, 0, -1);
+      dir.applyAxisAngle(new THREE.Vector3(1, 0, 0), player.pitch);
+      dir.applyAxisAngle(new THREE.Vector3(0, 1, 0), player.rotationY);
+
+      scene.add(bullet);
+      bullets.push({ mesh: bullet, dir: dir, speed: 75, isEnemy: false, createdAt: now });
+    }
+
+    function updateBullets(delta, now) {
+      for (let i = bullets.length - 1; i >= 0; i--) {
+        const b = bullets[i];
+        b.mesh.position.addScaledVector(b.dir, b.speed * delta);
+
+        // Remover projéteis antigos (alcance)
+        if (now - b.createdAt > 2000) {
+          scene.remove(b.mesh);
+          bullets.splice(i, 1);
+          continue;
+        }
+
+        // Colisão com Inimigos (Tiro do Player)
+        if (!b.isEnemy) {
+          for (let j = 0; j < bots.length; j++) {
+            const bot = bots[j];
+            if (!bot.alive) continue;
+
+            if (b.mesh.position.distanceTo(bot.mesh.position) < 1.2) {
+              bot.hp -= player.weapon.damage;
+              scene.remove(b.mesh);
+              bullets.splice(i, 1);
+
+              if (bot.hp <= 0) {
+                bot.alive = false;
+                scene.remove(bot.mesh);
+                GAME_STATE.kills++;
+                GAME_STATE.aliveCount--;
+                addKillFeed(GAME_STATE.playerName, bot.name);
+                updateHUD();
+
+                if (GAME_STATE.aliveCount <= 1) {
+                  endGame(true);
+                }
+              }
+              break;
+            }
+          }
+        } 
+        // Colisão com Jogador (Tiro do Bot)
+        else {
+          if (b.mesh.position.distanceTo(player.position) < 1.0) {
+            applyDamageToPlayer(18);
+            showDamageOverlay();
+            scene.remove(b.mesh);
+            bullets.splice(i, 1);
+          }
+        }
+      }
+    }
+
+    /* =========================================================================
+       10. INTERAÇÃO E RECOLHIMENTO DE LOOT
+       ========================================================================= */
+    function checkPickUpLoot() {
+      let foundNear = false;
+
+      lootItems.forEach(item => {
+        if (!item.active) return;
+
+        const dist = player.position.distanceTo(item.mesh.position);
+        if (dist < 2.5) {
+          foundNear = true;
+          pickupPrompt.classList.remove('hidden');
+          document.getElementById('pickup-text').innerText = `Pegar ${item.info.name}`;
+
+          if (keys.e) {
+            // Aplicar efeito do Loot
+            if (item.info.type === 'medkit') {
+              player.hp = Math.min(player.maxHp, player.hp + 50);
+            } else if (item.info.type === 'shield') {
+              player.shield = Math.min(player.maxShield, player.shield + 50);
+            } else if (item.info.type === 'weapon') {
+              player.weapon.reserve += 60;
+              player.weapon.damage = 35;
+              player.weapon.name = item.info.name;
+            }
+
+            item.active = false;
+            scene.remove(item.mesh);
+            updateHUD();
+            pickupPrompt.classList.add('hidden');
+          }
+        }
+      });
+
+      if (!foundNear) {
+        pickupPrompt.classList.add('hidden');
+      }
+    }
+
+    /* =========================================================================
+       11. DANO, HUD & FEEDBACK VISUAL
+       ========================================================================= */
+    function applyDamageToPlayer(amount) {
+      if (!GAME_STATE.active) return;
+
+      if (player.shield > 0) {
+        player.shield -= amount;
+        if (player.shield < 0) {
+          player.hp += player.shield; // Sobra de dano vai para a vida
+          player.shield = 0;
+        }
+      } else {
+        player.hp -= amount;
+      }
+
+      if (player.hp <= 0) {
+        player.hp = 0;
+        endGame(false);
+      }
+
+      updateHUD();
+    }
+
+    function showDamageOverlay() {
+      damageOverlay.style.opacity = '1';
+      setTimeout(() => { damageOverlay.style.opacity = '0'; }, 150);
+    }
+
+    function updateHUD() {
+      document.getElementById('hud-hp-val').innerText = `${Math.ceil(player.hp)} / ${player.maxHp}`;
+      document.getElementById('hud-hp-bar').style.width = `${(player.hp / player.maxHp) * 100}%`;
+
+      document.getElementById('hud-shield-val').innerText = `${Math.ceil(player.shield)} / ${player.maxShield}`;
+      document.getElementById('hud-shield-bar').style.width = `${(player.shield / player.maxShield) * 100}%`;
+
+      document.getElementById('hud-ammo-clip').innerText = player.weapon.clip;
+      document.getElementById('hud-ammo-reserve').innerText = player.weapon.reserve;
+      document.getElementById('hud-weapon-name').innerText = player.weapon.name;
+
+      document.getElementById('hud-kills').innerText = GAME_STATE.kills;
+      document.getElementById('hud-alive').innerText = GAME_STATE.aliveCount;
+    }
+
+    function addKillFeed(killer, victim) {
+      const feed = document.getElementById('killfeed-container');
+      const item = document.createElement('div');
+      item.className = 'glass-panel px-3 py-1.5 rounded-lg border-red-500/40 text-right animate-pulse';
+      item.innerHTML = `<span class="text-amber-400 font-bold">${killer}</span> <i class="fa-solid fa-crosshairs text-red-500 mx-1"></i> <span class="text-gray-300">${victim}</span>`;
+      feed.appendChild(item);
+
+      setTimeout(() => { item.remove(); }, 4000);
+    }
+
+    /* =========================================================================
+       12. MINIMAPA / RADAR (CANVAS 2D)
+       ========================================================================= */
+    const miniCanvas = document.getElementById('minimap');
+    const miniCtx = miniCanvas.getContext('2d');
+
+    function renderMinimap() {
+      const w = miniCanvas.width;
+      const h = miniCanvas.height;
+      const scale = w / (MAP_SIZE * 2);
+
+      miniCtx.clearRect(0, 0, w, h);
+
+      // Fundo do Mapa
+      miniCtx.fillStyle = '#15803d';
+      miniCtx.fillRect(0, 0, w, h);
+
+      // Safezone no Radar
+      const centerCanvasX = (GAME_STATE.safeZoneCenter.x + MAP_SIZE) * scale;
+      const centerCanvasY = (GAME_STATE.safeZoneCenter.z + MAP_SIZE) * scale;
+      const radiusCanvas = GAME_STATE.safeZoneRadius * scale;
+
+      miniCtx.beginPath();
+      miniCtx.arc(centerCanvasX, centerCanvasY, radiusCanvas, 0, Math.PI * 2);
+      miniCtx.strokeStyle = '#f59e0b';
+      miniCtx.lineWidth = 2;
+      miniCtx.stroke();
+
+      // Desenhar Bots (Pontos Vermelhos)
+      bots.forEach(bot => {
+        if (!bot.alive) return;
+        const bx = (bot.mesh.position.x + MAP_SIZE) * scale;
+        const bz = (bot.mesh.position.z + MAP_SIZE) * scale;
+
+        miniCtx.fillStyle = '#ef4444';
+        miniCtx.beginPath();
+        miniCtx.arc(bx, bz, 3, 0, Math.PI * 2);
+        miniCtx.fill();
+      });
+
+      // Desenhar Jogador (Ponto Amarelo com Triângulo de Visão)
+      const px = (player.position.x + MAP_SIZE) * scale;
+      const pz = (player.position.z + MAP_SIZE) * scale;
+
+      miniCtx.fillStyle = '#fbbf24';
+      miniCtx.beginPath();
+      miniCtx.arc(px, pz, 4, 0, Math.PI * 2);
+      miniCtx.fill();
+    }
+
+    /* =========================================================================
+       13. LOOP DE ANIMAÇÃO PRINCIPAL
+       ========================================================================= */
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const delta = clock.getDelta();
+      const now = performance.now();
+
+      if (GAME_STATE.active) {
+        updatePlayerMovement(delta);
+        updateBots(delta, now);
+        updateBullets(delta, now);
+        updateSafeZone(delta);
+        checkPickUpLoot();
+        renderMinimap();
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    /* =========================================================================
+       14. CONTROLE DE FLUXO DE JOGO (START, END, RESTART)
+       ========================================================================= */
+    function startGame() {
+      const nameInput = document.getElementById('player-name-input').value.trim();
+      if (nameInput) GAME_STATE.playerName = nameInput;
+
+      menuOverlay.classList.add('hidden');
+      hudUi.classList.remove('hidden');
+      crosshair.classList.remove('hidden');
+
+      setupPlayer();
+      spawnBots();
+
+      GAME_STATE.active = true;
+      document.body.requestPointerLock();
+    }
+
+    function endGame(victory) {
+      GAME_STATE.active = false;
+      document.exitPointerLock();
+
+      hudUi.classList.add('hidden');
+      crosshair.classList.add('hidden');
+      gameoverOverlay.classList.remove('hidden');
+
+      const iconBox = document.getElementById('gameover-icon-box');
+      const title = document.getElementById('gameover-title');
+      const subtitle = document.getElementById('gameover-subtitle');
+
+      if (victory) {
+        iconBox.className = "w-20 h-20 mx-auto rounded-full bg-amber-500/20 border-2 border-amber-400 flex items-center justify-center text-4xl text-amber-400";
+        iconBox.innerHTML = '<i class="fa-solid fa-trophy"></i>';
+        title.innerText = "BOOYAH!";
+        title.className = "text-3xl font-black uppercase tracking-wider text-amber-400";
+        subtitle.innerText = "Você foi o único sobrevivente da ilha!";
+      } else {
+        iconBox.className = "w-20 h-20 mx-auto rounded-full bg-red-600/20 border-2 border-red-500 flex items-center justify-center text-4xl text-red-500";
+        iconBox.innerHTML = '<i class="fa-solid fa-skull"></i>';
+        title.innerText = "ELIMINADO";
+        title.className = "text-3xl font-black uppercase tracking-wider text-red-500";
+        subtitle.innerText = "Você não sobreviveu aos adversários.";
+      }
+
+      document.getElementById('gameover-rank').innerText = `#${GAME_STATE.aliveCount} / ${INITIAL_BOTS + 1}`;
+      document.getElementById('gameover-kills').innerText = GAME_STATE.kills;
+
+      // Salvar resultado no Supabase caso configurado
+      savePlayerStatsToSupabase(GAME_STATE.playerName, GAME_STATE.kills, GAME_STATE.aliveCount);
+    }
+
+    // Event Listeners dos Botões
+    document.getElementById('btn-start').addEventListener('click', startGame);
+    document.getElementById('btn-restart').addEventListener('click', () => {
+      window.location.reload();
+    });
+
+    // Iniciar Three.js no carregamento
+    window.onload = () => {
+      initThree();
+      animate();
+    };
+  </script>
+</body>
+</html>
